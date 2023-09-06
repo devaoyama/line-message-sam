@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  line-messaging-sam
+
+  Sample SAM Template for line-messaging-sam
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+    Tracing: Active
+  Api:
+    OpenApiVersion: 3.0.1
+    TracingEnabled: true
+Resources:
+  # SQS
+  LineMessagesQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      ReceiveMessageWaitTimeSeconds: 20
+
+  # API Gateway
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+
+  # Lambda Functions
+  LineWebhookFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: line-webhook/
+      Handler: app.lambdaHandler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          QUEUE_URL: !GetAtt LineMessagesQueue.QueueUrl
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt LineMessagesQueue.QueueName
+        - SSMParameterReadPolicy:
+            ParameterName: "aoyama/line/channel-secret"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /line-webhook
+            Method: POST
+            RestApiId:
+              Ref: ApiGatewayApi
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+          - app.ts
+  ReadLineMessagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: read-line-messages/
+      Handler: app.lambdaHandler
+      Runtime: nodejs18.x
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+          - app.ts
+  ReplyMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: reply-message/
+      Handler: app.lambdaHandler
+      Runtime: nodejs18.x
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: "aoyama/line/access-token"
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+          - app.ts
+
+  # DynamoDB
+  MessageTable:
+    Type: AWS::Serverless::SimpleTable
+    AttributeDefinitions:
+      - AttributeName: UserId
+        AttributeType: S
+      - AttributeName: SentAt
+        AttributeType: N
+    KeySchema:
+      - AttributeName: UserId
+        KeyType: HASH
+      - AttributeName: SentAt
+        KeyType: RANGE
+    ProvisionedThroughput:
+      ReadCapacityUnits: 2
+      WriteCapacityUnits: 2
